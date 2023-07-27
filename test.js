@@ -131,7 +131,7 @@ function getTodo() {
 		console.log(`started adding empty frames to ${stamp}, ${stamps.length-index} remaining`)
 		for(let i=0;i<=5;i++) {
 			if(!fs.existsSync(`frames/${stamp}/${i}.png`)) {
-				fs.copyFileSync('frames/empty.png',`frames/${stamp}/${i}.png`)
+				fs.copyFileSync('empty.png',`frames/${stamp}/${i}.png`)
 			}
 		}
 	}
