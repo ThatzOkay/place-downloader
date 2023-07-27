@@ -1,0 +1,16 @@
+[package]
+name = "place_downloader"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+dirs = "5.0.1"
+ffmpeg-next = "6.0.0"
+magick_rust = "0.19.0"
+reqwest = "0.11.18"
+serde = "1.0.176"
+serde_derive = "1.0.176"
+serde_json = "1.0.104"
+tokio = "1.29.1"
