@@ -26,7 +26,8 @@ impl DownloadMenu {
                 for account in accounts {
                     if account.jwt_token.is_none() && account.password.is_some() {
                         let password = account.password.unwrap();
-        
+                        
+                        println!("Loggin in with {} and {}", account.username, password);
                         // Get token from reddit
                         match RedditManager::get_reddit_token(&account.username, &password).await {
                             Ok(token) => println!("{}", token),
