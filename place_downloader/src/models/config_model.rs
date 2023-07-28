@@ -6,8 +6,9 @@ pub struct AppConfig {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone)]
 pub struct Account {
-    pub username: Option<String>,
+    pub username: String,
     pub password: Option<String>,
     pub jwt_token: Option<String>,
 }
@@ -25,17 +26,17 @@ impl AppConfig {
 }
 
 impl Account {
-    fn with_credentials(username: String, password: String) -> Self {
+    pub fn with_credentials(username: String, password: String) -> Self {
         Account {
-            username: Some(username),
+            username,
             password: Some(password),
             jwt_token: None,
         }
     }
 
-    fn with_token(username: String, jwt_token: String) -> Self {
+    pub fn with_token(username: String, jwt_token: String) -> Self {
         Account {
-            username: Some(username),
+            username,
             password: None,
             jwt_token: Some(jwt_token),
         }
