@@ -97,6 +97,9 @@ impl AccountMenu {
             }
         }
 
+        // Apply trim() to remove leading and trailing whitespaces
+        let new_username = new_username.trim().to_string();
+
         let exists = Self::does_account_exist(new_username.clone());
         if exists.is_some() {
             println!("Account already exists");
@@ -111,6 +114,9 @@ impl AccountMenu {
                 Self::account_management().await;
             }
         }
+
+        // Apply trim() to remove leading and trailing whitespaces
+        let new_password = new_password.trim().to_string();
 
         let account = Account::with_credentials(new_username, new_password);
 

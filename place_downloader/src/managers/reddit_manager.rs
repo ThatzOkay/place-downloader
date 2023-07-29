@@ -1,15 +1,17 @@
+use colored::Colorize;
+use log;
 use reqwest::{
     cookie::Jar,
     header::{HeaderName, HeaderValue},
-    ClientBuilder,
+    Client, ClientBuilder, Url,
 };
 use serde_json::Value;
-use std::sync::Arc;
+use std::{fs, sync::Arc};
 
 pub struct RedditManager;
 
 // TODO: Move to config
-pub const REDDIT_URL: &str = "https://www.reddit.com";
+pub const REDDIT_URL: &str = "https://www.reddit.com/";
 pub const LOGIN_URL: &str = "https://www.reddit.com/login";
 
 impl RedditManager {
@@ -49,13 +51,17 @@ impl RedditManager {
         let jar = Arc::new(Jar::default());
 
         let client = ClientBuilder::new()
-            .default_headers(headers)
+            .default_headers(headers.clone())
             .cookie_provider(Arc::clone(&jar))
             .cookie_store(true)
             .build()?;
 
         let mut response = client.get(REDDIT_URL).send().await?;
         if !response.status().is_success() {
+            log::error!(
+                "Request to Reddit failed with status code: {}",
+                response.status()
+            );
             return Err(format!(
                 "Request to Reddit failed with status code: {}",
                 response.status()
@@ -65,64 +71,85 @@ impl RedditManager {
 
         // Get CSRF token from login page
         println!("Getting CSRF token...");
-        let mut response_text = client.get(LOGIN_URL).send().await?.text().await?;
-        let csrf_token = {
-            let document = scraper::Html::parse_document(&response_text);
-            let csrf_token = document
-                .select(&scraper::Selector::parse("input[name=csrf_token]").unwrap())
-                .next()
-                .and_then(|input| input.value().attr("value"))
-                .ok_or("Could not find CSRF token")?;
-            csrf_token.to_string()
+        let response_text_login = client.get(LOGIN_URL).send().await?.text().await?;
+
+        let element = "<input type=\"hidden\" name=\"csrf_token\" value=\"";
+        let start_index_found = response_text_login.find(element);
+        
+        let start_index = match start_index_found {
+            Some(index) => index,
+            None => 0,
         };
+
+        let csrf_token: &String = &response_text_login[start_index + element.len()..].chars().take_while(|&char| char!='"' ).collect::<String>();
 
         let form_data = [
             ("username", &uname.clone()),
             ("password", &passwd.clone()),
             ("dest", &REDDIT_URL.to_string().clone()),
-            ("csrf_token", &csrf_token.clone()),
+             ("csrf_token", csrf_token),
         ];
 
         // Login
-        response = client
-            .post(LOGIN_URL)
-            .form(&form_data)
+        response = client.post(LOGIN_URL).form(&form_data).send().await?;
+
+        if !response.status().is_success() {
+            let status = response.status().clone();
+            log::error!("Login to Reddit failed with status code: {}", status);
+
+            // Log response headers (if needed)
+            for (name, value) in response.headers() {
+                log::error!("Response Header: {}: {:?}", name, value);
+            }
+
+            // Log response body (if needed)
+            let response_text = response.text().await?;
+            log::error!("Response Body: {}", response_text);
+
+            return Err(format!("Login to Reddit failed with status code: {}", status).into());
+        }
+
+        println!("{} {}", uname, "Login successful!".green());
+
+        // Get new access token
+        println!(
+            "{} {} {}{}",
+            uname,
+            "Getting".green(),
+            "reddit".red(),
+            " access token...".green()
+        );
+
+        let reddit_response = client
+            .get(REDDIT_URL)
+            .headers(headers.clone())
             .send()
             .await?;
 
-        if !response.status().is_success() {
-            return Err(format!(
-                "Login to Reddit failed with status code: {}",
-                response.status()
-            )
-            .into());
+        let mut jwt_token: Option<String> = None;
+
+        for (header_name, header_value) in reddit_response.headers().iter() {
+            if header_name == "set-cookie" {
+                for cookie in header_value.to_str().unwrap().split(';') {
+                    if cookie.trim().starts_with("token_v2=") {
+                        jwt_token = Some(cookie.trim_start_matches("token_v2=").to_string());
+                        break; // Stop searching after finding the token
+                    }
+                }
+            }
         }
 
-        response_text = response.text().await?;
-
-        let data_str = {
-            let document = scraper::Html::parse_document(&response_text);
-            println!("{}", response_text);
-            let script = document
-                .select(&scraper::Selector::parse("script#data").unwrap())
-                .next()
-                .ok_or("Could not find data script")?;
-            let content = script.inner_html();
-            let content_owned = content
-                .trim_start_matches("window.__r = ")
-                .trim_end_matches(';')
-                .to_string();
-            content_owned
+        let token = match jwt_token {
+            Some(token) => {
+                println!("JWT Token: {}", token);
+                token
+            }
+            None => {
+                println!("JWT Token not found in the 'token_v2' header.");
+                "".into()
+            }
         };
 
-        let data: Value = serde_json::from_str(&data_str)?;
-
-        let token = format!(
-            "Bearer {}",
-            data["user"]["session"]["accessToken"]
-                .as_str()
-                .ok_or("No access token")?
-        );
         Ok(token)
     }
 }
