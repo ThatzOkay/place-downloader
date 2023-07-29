@@ -6,7 +6,8 @@ use reqwest::{
     Client, ClientBuilder, Url,
 };
 use serde_json::Value;
-use std::{fs, sync::Arc};
+use std::{fs, sync::Arc, collections::HashMap, time::{SystemTime, Duration, UNIX_EPOCH}};
+use base64::{Engine as _, alphabet, engine::{self, general_purpose}};
 
 pub struct RedditManager;
 
@@ -151,5 +152,42 @@ impl RedditManager {
         };
 
         Ok(token)
+    }
+
+    pub fn decode_jwt_and_get_expiry(mut jwt_token: &str) -> Result<i64, String> {
+        jwt_token = jwt_token.trim_start_matches("Bearer ");
+
+        match jwt_token.split('.').collect::<Vec<&str>>()[..] {
+            [_, payload, _] => {
+                let decoded_payload = Self::base64url_decode(payload)
+                    .map_err(|e| format!("Failed to decode payload: {}", e))?;
+    
+                let payload_data: HashMap<String, Value> = serde_json::from_slice(&decoded_payload)
+                    .map_err(|e| format!("Failed to parse JSON payload: {}", e))?;
+    
+                match payload_data.get("exp") {
+                    Some(exp_value) => match exp_value.as_i64() {
+                        Some(expiration_time) => Ok(expiration_time),
+                        None => Err("Invalid 'exp' value in payload".to_string()),
+                    },
+                    None => Err("Token does not have an expiry date!".to_string()),
+                }
+            }
+            _ => Err("Invalid JWT format".to_string()),
+        }
+    }
+    
+    pub fn is_expired(auth_token_expires_at: f64) -> bool {
+        let current_time = SystemTime::now().duration_since(UNIX_EPOCH).expect("Time went backwards!");
+        let expires_at_duration = Duration::from_secs_f64(auth_token_expires_at);
+        current_time > expires_at_duration
+    }
+
+    pub fn base64url_decode(input_str: &str) -> Result<Vec<u8>, base64::DecodeError>  {
+        let decoder = engine::GeneralPurpose::new(
+            &alphabet::URL_SAFE,
+            general_purpose::NO_PAD);
+        let decoded = decoder.decode(input_str)?;
+        Ok(decoded)
     }
 }
