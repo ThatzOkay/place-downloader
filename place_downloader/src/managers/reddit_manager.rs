@@ -1,13 +1,23 @@
+use base64::{
+    alphabet,
+    engine::{self, general_purpose},
+    Engine as _,
+};
 use colored::Colorize;
 use log;
+use rand::Rng;
 use reqwest::{
     cookie::Jar,
-    header::{HeaderName, HeaderValue},
-    Client, ClientBuilder, Url,
+    header::{HeaderName, HeaderValue}, ClientBuilder,
 };
 use serde_json::Value;
-use std::{fs, sync::Arc, collections::HashMap, time::{SystemTime, Duration, UNIX_EPOCH}};
-use base64::{Engine as _, alphabet, engine::{self, general_purpose}};
+use std::{
+    collections::HashMap,
+    sync::Arc,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
+
+use crate::models::token_model::Token;
 
 pub struct RedditManager;
 
@@ -15,29 +25,88 @@ pub struct RedditManager;
 pub const REDDIT_URL: &str = "https://www.reddit.com/";
 pub const LOGIN_URL: &str = "https://www.reddit.com/login";
 
+//This can be done so much better
+pub const USER_AGENTS: &str = r#"[
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/115.0",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/115.0",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/114.0",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.5.1 Safari/605.1.15",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:109.0) Gecko/20100101 Firefox/115.0",
+    "Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/114.0",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36 Edg/114.0.1823.67",
+    "Mozilla/5.0 (Windows NT 10.0; rv:109.0) Gecko/20100101 Firefox/115.0",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36 Edg/114.0.1823.82",
+    "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/115.0",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.5.2 Safari/605.1.15",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:109.0) Gecko/20100101 Firefox/114.0",
+    "Mozilla/5.0 (X11; Linux x86_64; rv:102.0) Gecko/20100101 Firefox/102.0",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36 Edg/115.0.1901.183",
+    "Mozilla/5.0 (Windows NT 10.0; rv:114.0) Gecko/20100101 Firefox/114.0",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:102.0) Gecko/20100101 Firefox/102.0",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36 OPR/99.0.0.0",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36 Edg/114.0.1823.58",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36 Edg/114.0.1823.79",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.5 Safari/605.1.15",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/77.0.3865.75 Safari/537.36",
+    "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/114.0",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36 OPR/100.0.0.0",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/116.0",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/111.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (X11; CrOS x86_64 14541.0.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.3 Safari/605.1.15",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.4 Safari/605.1.15",
+    "Mozilla/5.0 (Windows NT 10.0; rv:102.0) Gecko/20100101 Firefox/102.0",
+    "Mozilla/5.0 (Windows NT 10.0; WOW64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.5666.197 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.2 Safari/605.1.15",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_2) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/79.0.3945.88 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.6.1 Safari/605.1.15",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/99.0.4844.51 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36 Edg/114.0.1823.86",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/113.0",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 YaBrowser/23.5.4.674 Yowser/2.5 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 YaBrowser/23.5.4.674 Yowser/2.5 Safari/537.36"
+  ]"#;
+
 impl RedditManager {
-    pub fn initial_headers() -> &'static [(&'static str, &'static str)] {
-        &[
-            ("accept", "*/*"),
-            ("accept-encoding", "gzip, deflate, br"),
-            ("accept-language", "en"),
-            ("content-type", "application/x-www-form-urlencoded"),
-            ("origin", REDDIT_URL),
-            // # these headers seem to break the login
-            // ("sec-ch-ua", r#""Not.A/Brand";v="8", "Chromium";v="114", "Google Chrome";v="114""#),
-            // ("sec-ch-ua-mobile", "?0"),
-            // ("sec-ch-ua-platform", r#""Windows""#),
-            // ("sec-fetch-dest", "empty"),
-            ("sec-fetch-mode", "cors"),
-            ("sec-fetch-site", "same-origin"),
-            ("user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36"),
+    pub fn get_random_ua() -> Result<String, Box<dyn std::error::Error>> {
+        let user_agent_list: Vec<String> = serde_json::from_str(USER_AGENTS)?;
+
+        let mut rng = rand::thread_rng();
+        let random_index = rng.gen_range(0..user_agent_list.len());
+
+        Ok(user_agent_list[random_index].clone())
+    }
+
+    pub fn initial_headers() -> Vec<(&'static str, String)> {
+        let user_agent = match Self::get_random_ua() {
+            Ok(user_agent) => user_agent,
+            Err(_) => "".to_string(),
+        };
+    
+        vec![
+            ("origin", REDDIT_URL.to_string()),
+            ("user-agent", user_agent),
         ]
     }
 
     pub async fn get_reddit_token(
         username: &String,
         password: &String,
-    ) -> Result<String, Box<dyn std::error::Error>> {
+    ) -> Result<Token, Box<dyn std::error::Error>> {
         let uname: String = username.clone();
         let passwd = password.clone();
         println!("Logging into reddit with {} and {}", uname, passwd);
@@ -45,7 +114,7 @@ impl RedditManager {
         for (name, value) in Self::initial_headers() {
             headers.insert(
                 HeaderName::from_bytes(name.as_bytes()).unwrap(),
-                HeaderValue::from_str(value).unwrap(),
+                HeaderValue::from_str(&value).unwrap(),
             );
         }
 
@@ -76,19 +145,22 @@ impl RedditManager {
 
         let element = "<input type=\"hidden\" name=\"csrf_token\" value=\"";
         let start_index_found = response_text_login.find(element);
-        
+
         let start_index = match start_index_found {
             Some(index) => index,
             None => 0,
         };
 
-        let csrf_token: &String = &response_text_login[start_index + element.len()..].chars().take_while(|&char| char!='"' ).collect::<String>();
+        let csrf_token: &String = &response_text_login[start_index + element.len()..]
+            .chars()
+            .take_while(|&char| char != '"')
+            .collect::<String>();
 
         let form_data = [
             ("username", &uname.clone()),
             ("password", &passwd.clone()),
             ("dest", &REDDIT_URL.to_string().clone()),
-             ("csrf_token", csrf_token),
+            ("csrf_token", csrf_token),
         ];
 
         // Login
@@ -108,6 +180,21 @@ impl RedditManager {
             log::error!("Response Body: {}", response_text);
 
             return Err(format!("Login to Reddit failed with status code: {}", status).into());
+        
+        }
+
+        let mut reddit_session: Option<String> = None;
+
+        for (header_name, header_value) in response.headers().iter() {
+            
+            if header_name == "set-cookie" {
+                for cookie in header_value.to_str().unwrap().split(';') {
+                    if cookie.trim().starts_with("reddit_session=") {
+                        reddit_session = Some(cookie.trim_start_matches("reddit_session=").split('%').next().unwrap_or("").to_string());
+                        break; // Stop searching after finding the token
+                    }
+                }
+            }
         }
 
         println!("{} {}", uname, "Login successful!".green());
@@ -130,6 +217,7 @@ impl RedditManager {
         let mut jwt_token: Option<String> = None;
 
         for (header_name, header_value) in reddit_response.headers().iter() {
+
             if header_name == "set-cookie" {
                 for cookie in header_value.to_str().unwrap().split(';') {
                     if cookie.trim().starts_with("token_v2=") {
@@ -142,7 +230,6 @@ impl RedditManager {
 
         let token = match jwt_token {
             Some(token) => {
-                println!("JWT Token: {}", token);
                 token
             }
             None => {
@@ -151,7 +238,16 @@ impl RedditManager {
             }
         };
 
-        Ok(token)
+        let session = match reddit_session {
+            Some(reddit_sesion) => reddit_sesion,
+            None => {
+                
+                println!("reddit session not found in the 'reddit_session' header.");
+                "".into()
+            }
+        };
+
+        Ok(Token::new(session, token))
     }
 
     pub fn decode_jwt_and_get_expiry(mut jwt_token: &str) -> Result<i64, String> {
@@ -161,10 +257,10 @@ impl RedditManager {
             [_, payload, _] => {
                 let decoded_payload = Self::base64url_decode(payload)
                     .map_err(|e| format!("Failed to decode payload: {}", e))?;
-    
+
                 let payload_data: HashMap<String, Value> = serde_json::from_slice(&decoded_payload)
                     .map_err(|e| format!("Failed to parse JSON payload: {}", e))?;
-    
+
                 match payload_data.get("exp") {
                     Some(exp_value) => match exp_value.as_i64() {
                         Some(expiration_time) => Ok(expiration_time),
@@ -176,17 +272,17 @@ impl RedditManager {
             _ => Err("Invalid JWT format".to_string()),
         }
     }
-    
+
     pub fn is_expired(auth_token_expires_at: f64) -> bool {
-        let current_time = SystemTime::now().duration_since(UNIX_EPOCH).expect("Time went backwards!");
+        let current_time = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("Time went backwards!");
         let expires_at_duration = Duration::from_secs_f64(auth_token_expires_at);
         current_time > expires_at_duration
     }
 
-    pub fn base64url_decode(input_str: &str) -> Result<Vec<u8>, base64::DecodeError>  {
-        let decoder = engine::GeneralPurpose::new(
-            &alphabet::URL_SAFE,
-            general_purpose::NO_PAD);
+    pub fn base64url_decode(input_str: &str) -> Result<Vec<u8>, base64::DecodeError> {
+        let decoder = engine::GeneralPurpose::new(&alphabet::URL_SAFE, general_purpose::NO_PAD);
         let decoded = decoder.decode(input_str)?;
         Ok(decoded)
     }

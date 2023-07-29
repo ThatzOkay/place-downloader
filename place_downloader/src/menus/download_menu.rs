@@ -30,7 +30,11 @@ impl DownloadMenu {
                         println!("Loggin in with {} and {}", account.username, password);
                         // Get token from reddit
                         match RedditManager::get_reddit_token(&account.username, &password).await {
-                            Ok(token) => println!("{}", RedditManager::decode_jwt_and_get_expiry(&token).unwrap()),
+                            Ok(token) => {
+                                println!("session: {:#?}", token.reddit_session);
+                                println!("jwt: {:#?}", token.jwt_token);
+                                println!("timestamp: {:#?}", RedditManager::decode_jwt_and_get_expiry(&token.jwt_token));
+                            },
                             Err(err) => eprintln!("Error: {}", err),
                         }
                     }
