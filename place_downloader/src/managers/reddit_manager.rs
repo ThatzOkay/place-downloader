@@ -8,7 +8,8 @@ use log;
 use rand::Rng;
 use reqwest::{
     cookie::Jar,
-    header::{HeaderName, HeaderValue}, ClientBuilder,
+    header::{HeaderName, HeaderValue},
+    Client, ClientBuilder,
 };
 use serde_json::Value;
 use std::{
@@ -96,7 +97,7 @@ impl RedditManager {
             Ok(user_agent) => user_agent,
             Err(_) => "".to_string(),
         };
-    
+
         vec![
             ("origin", REDDIT_URL.to_string()),
             ("user-agent", user_agent),
@@ -118,11 +119,8 @@ impl RedditManager {
             );
         }
 
-        let jar = Arc::new(Jar::default());
-
         let client = ClientBuilder::new()
             .default_headers(headers.clone())
-            .cookie_provider(Arc::clone(&jar))
             .cookie_store(true)
             .build()?;
 
@@ -180,17 +178,22 @@ impl RedditManager {
             log::error!("Response Body: {}", response_text);
 
             return Err(format!("Login to Reddit failed with status code: {}", status).into());
-        
         }
 
         let mut reddit_session: Option<String> = None;
 
         for (header_name, header_value) in response.headers().iter() {
-            
             if header_name == "set-cookie" {
                 for cookie in header_value.to_str().unwrap().split(';') {
                     if cookie.trim().starts_with("reddit_session=") {
-                        reddit_session = Some(cookie.trim_start_matches("reddit_session=").split('%').next().unwrap_or("").to_string());
+                        reddit_session = Some(
+                            cookie
+                                .trim_start_matches("reddit_session=")
+                                .split('%')
+                                .next()
+                                .unwrap_or("")
+                                .to_string(),
+                        );
                         break; // Stop searching after finding the token
                     }
                 }
@@ -217,7 +220,6 @@ impl RedditManager {
         let mut jwt_token: Option<String> = None;
 
         for (header_name, header_value) in reddit_response.headers().iter() {
-
             if header_name == "set-cookie" {
                 for cookie in header_value.to_str().unwrap().split(';') {
                     if cookie.trim().starts_with("token_v2=") {
@@ -229,9 +231,7 @@ impl RedditManager {
         }
 
         let token = match jwt_token {
-            Some(token) => {
-                token
-            }
+            Some(token) => token,
             None => {
                 println!("JWT Token not found in the 'token_v2' header.");
                 "".into()
@@ -241,7 +241,6 @@ impl RedditManager {
         let session = match reddit_session {
             Some(reddit_sesion) => reddit_sesion,
             None => {
-                
                 println!("reddit session not found in the 'reddit_session' header.");
                 "".into()
             }
@@ -271,6 +270,63 @@ impl RedditManager {
             }
             _ => Err("Invalid JWT format".to_string()),
         }
+    }
+
+    pub async fn refresh_token_if_needed(token: Token) -> Result<Token, Box<dyn std::error::Error>> {
+        let timestamp = match Self::decode_jwt_and_get_expiry(&token.jwt_token) {
+            Ok(timestamp) => timestamp,
+            Err(_) => 0,
+        };
+        if !Self::is_expired(timestamp as f64) {
+            let mut headers = reqwest::header::HeaderMap::new();
+            for (name, value) in Self::initial_headers() {
+                headers.insert(
+                    HeaderName::from_bytes(name.as_bytes()).unwrap(),
+                    HeaderValue::from_str(&value).unwrap(),
+                );
+            }
+
+            headers.insert(
+                "set-cookie",
+                HeaderValue::from_str(&format!("reddit_session={}", token.reddit_session)).unwrap(),
+            );
+
+            let client = ClientBuilder::new()
+                .default_headers(headers.clone())
+                .cookie_store(true)
+                .build()?;
+
+            let reddit_response = client
+                .get(REDDIT_URL)
+                .headers(headers.clone())
+                .send()
+                .await?;
+
+                let mut jwt_token: Option<String> = None;
+
+                for (header_name, header_value) in reddit_response.headers().iter() {
+                    if header_name == "set-cookie" {
+                        for cookie in header_value.to_str().unwrap().split(';') {
+                            if cookie.trim().starts_with("token_v2=") {
+                                jwt_token = Some(cookie.trim_start_matches("token_v2=").to_string());
+                                break; // Stop searching after finding the token
+                            }
+                        }
+                    }
+                }
+
+                let jwt_token = match jwt_token {
+                    Some(token) => token,
+                    None => {
+                        println!("JWT Token not found in the 'token_v2' header.");
+                        "".into()
+                    }
+                };
+        
+            return Ok(Token::new(token.reddit_session, jwt_token));
+        }
+
+        Ok(token)
     }
 
     pub fn is_expired(auth_token_expires_at: f64) -> bool {
